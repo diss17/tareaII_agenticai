@@ -1,0 +1,78 @@
+# ========================================
+# Python
+# ========================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.secret
+*.key
+
+# ========================================
+# Proyecto específico
+# ========================================
+# Base de datos SQLite del calendario (persistencia local)
+calendar.db
+*.sqlite
+*.sqlite3
+*.db
+
+# Archivos de modelo descargados por Ollama (si se copian al proyecto)
+models/*.gguf
+models/*.bin
+models/*.safetensors
+
+# Archivos de trazas o logs locales
+logs/
+*.trace
+
+# Salidas de ejecución temporal
+output/
+tmp/
+temp/
