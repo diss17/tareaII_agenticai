@@ -2,11 +2,11 @@
 
 from datetime import datetime, timedelta
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from state import AgentState
-from models import get_llm
+from models import get_llm, get_structured_llm, OrganizerOutput
 from tools import add_event, get_events, update_event, delete_event
-from utils import parse_json_output
+from utils import is_tool_error, make_tool_error, trace, trace_message, trace_tool
 
 
 SYSTEM_PROMPT_TEMPLATE = """Eres un agente organizador especializado en gestión del tiempo.
@@ -17,17 +17,7 @@ Tienes acceso a un calendario local persistente. Debes usar una de estas herrami
 - "update_event": modifica un evento. Argumentos: event_id (int), title (str, opcional), event_datetime (str, opcional), description (str, opcional).
 - "delete_event": elimina un evento. Argumentos: event_id (int).
 
-Responde ÚNICAMENTE con un objeto JSON válido con este formato exacto:
-{{
-  "tool": "nombre_de_la_herramienta",
-  "arguments": {{
-    "arg1": "valor1",
-    "arg2": "valor2"
-  }}
-}}
-
 Reglas:
-- No añadas explicaciones fuera del JSON.
 - La fecha de hoy es {today}.
 - Si el usuario dice "mañana", usa {tomorrow}.
 - Si el usuario dice "pasado mañana", usa {day_after_tomorrow}.
@@ -65,41 +55,78 @@ def _build_system_prompt() -> str:
 
 
 def organizer_node(state: AgentState) -> dict:
-    """Ejecuta el agente organizador y guarda el resultado."""
-    llm = get_llm(json_mode=True)
+    """Ejecuta el agente organizador y guarda el resultado.
+
+    Usa salida estructurada para que el modelo local produzca exactamente
+    la herramienta de calendario y los argumentos esperados.
+    """
+    trace("organizador", "Iniciando gestión de calendario")
     task = state.get("task_description", state["user_input"])
+    trace("organizador", f"Tarea recibida: {task}")
 
     messages = [
         SystemMessage(content=_build_system_prompt()),
         HumanMessage(content=task),
     ]
 
-    response = llm.invoke(messages)
-    parsed = parse_json_output(response.content)
+    trace_message("organizador", "modelo LLM", "Solicitando selección de herramienta de calendario")
 
-    tool_name = parsed.get("tool")
-    arguments = parsed.get("arguments", {})
-
-    if tool_name not in TOOLS:
+    try:
+        parsed = get_structured_llm(OrganizerOutput).invoke(messages)
+    except Exception as exc:
+        error_msg = f"Error: el organizador no pudo generar una llamada válida: {exc}"
+        trace("organizador", error_msg)
         return {
-            "agent_result": f"Error: herramienta de calendario desconocida '{tool_name}'.",
-            "messages": [response],
+            "agent_result": error_msg,
+            "messages": [AIMessage(content=error_msg)],
+            "last_error": error_msg,
+        }
+
+    trace_message("modelo LLM", "organizador", str(parsed.model_dump_json()))
+    trace("organizador", f"Herramienta seleccionada: {parsed.tool}")
+
+    if parsed.tool not in TOOLS:
+        error_msg = f"Error: herramienta de calendario desconocida '{parsed.tool}'."
+        trace("organizador", error_msg)
+        return {
+            "agent_result": error_msg,
+            "messages": [AIMessage(content=error_msg)],
+            "last_error": error_msg,
         }
 
     try:
-        raw_result = TOOLS[tool_name].invoke(arguments)
+        raw_result = TOOLS[parsed.tool].invoke(parsed.arguments)
     except Exception as exc:
-        raw_result = f"Error al ejecutar {tool_name}: {exc}"
+        raw_result = make_tool_error(f"Error al ejecutar {parsed.tool}: {exc}")
+
+    trace_tool("organizador", parsed.tool, parsed.arguments, raw_result)
+
+    if is_tool_error(raw_result):
+        error_msg = (
+            "No pudo completarse la operación del calendario. "
+            f"Error técnico: {raw_result}"
+        )
+        trace("organizador", f"La herramienta {parsed.tool} falló: {raw_result}")
+        return {
+            "agent_result": error_msg,
+            "messages": [AIMessage(content=error_msg)],
+            "last_error": raw_result,
+        }
 
     final_messages = [
         SystemMessage(
-            content=FINAL_PROMPT.format(tool_name=tool_name, arguments=arguments, result=raw_result)
+            content=FINAL_PROMPT.format(tool_name=parsed.tool, arguments=parsed.arguments, result=raw_result)
         ),
         HumanMessage(content="Genera la respuesta final."),
     ]
+    trace_message("organizador", "modelo LLM", "Solicitando respuesta final al usuario")
     final_response = get_llm().invoke(final_messages)
+    trace_message("modelo LLM", "organizador", str(final_response.content))
+
+    trace("organizador", f"Resultado final generado: {final_response.content}")
 
     return {
         "agent_result": str(final_response.content),
-        "messages": [response, final_response],
+        "messages": [AIMessage(content=str(parsed.model_dump_json())), final_response],
+        "last_error": "",
     }

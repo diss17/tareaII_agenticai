@@ -12,3 +12,6 @@ MAX_CRITIC_ITERATIONS = int(os.getenv("MAX_CRITIC_ITERATIONS", "3"))
 
 # Base de datos SQLite para el calendario
 CALENDAR_DB_PATH = os.getenv("CALENDAR_DB_PATH", "calendar.db")
+
+# Modo verbose: muestra el flujo interno entre agentes
+VERBOSE = os.getenv("VERBOSE", "true").lower() in {"true", "1", "yes"}

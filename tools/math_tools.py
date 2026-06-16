@@ -2,6 +2,7 @@
 
 import math
 from langchain_core.tools import tool
+from utils import make_tool_error
 
 
 @tool
@@ -16,8 +17,11 @@ def safe_eval(expression: str) -> str:
             Ejemplo: "15 * 23 + sqrt(9)" o "sin(pi/2) + log(10, 10)"
 
     Returns:
-        El resultado de la evaluación como string.
+        El resultado de la evaluación como string, o [TOOL_ERROR] si falla.
     """
+    if not expression or not expression.strip():
+        return make_tool_error("La expresión matemática está vacía.")
+
     allowed_names = {
         "sqrt": math.sqrt,
         "sin": math.sin,
@@ -43,4 +47,4 @@ def safe_eval(expression: str) -> str:
         result = eval(expression, {"__builtins__": {}}, allowed_names)
         return str(result)
     except Exception as exc:
-        return f"Error al evaluar '{expression}': {exc}"
+        return make_tool_error(f"Error al evaluar '{expression}': {exc}")

@@ -5,28 +5,35 @@ from datetime import datetime
 from typing import Optional
 from langchain_core.tools import tool
 from config import CALENDAR_DB_PATH
+from utils import make_tool_error
 
 
 def _get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(CALENDAR_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        conn = sqlite3.connect(CALENDAR_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"No se pudo conectar a la base de datos del calendario: {exc}") from exc
 
 
 def init_calendar_db() -> None:
     """Inicializa la tabla de eventos si no existe."""
-    with _get_connection() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                event_datetime TEXT NOT NULL,
-                description TEXT DEFAULT ''
+    try:
+        with _get_connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    event_datetime TEXT NOT NULL,
+                    description TEXT DEFAULT ''
+                )
+                """
             )
-            """
-        )
-        conn.commit()
+            conn.commit()
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"No se pudo inicializar la base de datos del calendario: {exc}") from exc
 
 
 @tool
@@ -39,7 +46,7 @@ def add_event(title: str, event_datetime: str, description: str = "") -> str:
         description: Descripción opcional del evento.
 
     Returns:
-        Confirmación del evento creado.
+        Confirmación del evento creado, o [TOOL_ERROR] si falla técnicamente.
     """
     try:
         dt = datetime.fromisoformat(event_datetime)
@@ -49,13 +56,16 @@ def add_event(title: str, event_datetime: str, description: str = "") -> str:
             "Usa el formato 'YYYY-MM-DD HH:MM' o 'YYYY-MM-DD'."
         )
 
-    with _get_connection() as conn:
-        cursor = conn.execute(
-            "INSERT INTO events (title, event_datetime, description) VALUES (?, ?, ?)",
-            (title, dt.isoformat(), description),
-        )
-        conn.commit()
-        event_id = cursor.lastrowid
+    try:
+        with _get_connection() as conn:
+            cursor = conn.execute(
+                "INSERT INTO events (title, event_datetime, description) VALUES (?, ?, ?)",
+                (title, dt.isoformat(), description),
+            )
+            conn.commit()
+            event_id = cursor.lastrowid
+    except sqlite3.Error as exc:
+        return make_tool_error(f"Error de base de datos al crear el evento: {exc}")
 
     return f"Evento creado con ID {event_id}: '{title}' el {dt.isoformat()}"
 
@@ -69,7 +79,7 @@ def get_events(date: Optional[str] = None) -> str:
             devuelve todos los eventos futuros.
 
     Returns:
-        Lista de eventos encontrados.
+        Lista de eventos encontrados, o [TOOL_ERROR] si falla técnicamente.
     """
     query = "SELECT * FROM events"
     params: tuple = ()
@@ -84,8 +94,11 @@ def get_events(date: Optional[str] = None) -> str:
     else:
         query += " WHERE event_datetime >= datetime('now') ORDER BY event_datetime"
 
-    with _get_connection() as conn:
-        rows = conn.execute(query, params).fetchall()
+    try:
+        with _get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+    except sqlite3.Error as exc:
+        return make_tool_error(f"Error de base de datos al consultar eventos: {exc}")
 
     if not rows:
         return "No se encontraron eventos."
@@ -100,9 +113,12 @@ def get_events(date: Optional[str] = None) -> str:
 
 
 @tool
-def update_event(event_id: int, title: Optional[str] = None,
-                 event_datetime: Optional[str] = None,
-                 description: Optional[str] = None) -> str:
+def update_event(
+    event_id: int,
+    title: Optional[str] = None,
+    event_datetime: Optional[str] = None,
+    description: Optional[str] = None,
+) -> str:
     """Modifica un evento existente.
 
     Args:
@@ -112,7 +128,7 @@ def update_event(event_id: int, title: Optional[str] = None,
         description: Nueva descripción (opcional).
 
     Returns:
-        Confirmación de la actualización.
+        Confirmación de la actualización, o [TOOL_ERROR] si falla técnicamente.
     """
     updates = []
     params: list = []
@@ -137,11 +153,14 @@ def update_event(event_id: int, title: Optional[str] = None,
     params.append(event_id)
     query = f"UPDATE events SET {', '.join(updates)} WHERE id = ?"
 
-    with _get_connection() as conn:
-        cursor = conn.execute(query, params)
-        conn.commit()
-        if cursor.rowcount == 0:
-            return f"No se encontró el evento con ID {event_id}."
+    try:
+        with _get_connection() as conn:
+            cursor = conn.execute(query, params)
+            conn.commit()
+            if cursor.rowcount == 0:
+                return f"No se encontró el evento con ID {event_id}."
+    except sqlite3.Error as exc:
+        return make_tool_error(f"Error de base de datos al actualizar el evento: {exc}")
 
     return f"Evento {event_id} actualizado correctamente."
 
@@ -154,13 +173,17 @@ def delete_event(event_id: int) -> str:
         event_id: ID del evento a eliminar.
 
     Returns:
-        Confirmación de la eliminación.
+        Confirmación de la eliminación, o [TOOL_ERROR] si falla técnicamente.
     """
-    with _get_connection() as conn:
-        cursor = conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
-        conn.commit()
-        if cursor.rowcount == 0:
-            return f"No se encontró el evento con ID {event_id}."
+    try:
+        with _get_connection() as conn:
+            cursor = conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+            conn.commit()
+            if cursor.rowcount == 0:
+                return f"No se encontró el evento con ID {event_id}."
+    except sqlite3.Error as exc:
+        return make_tool_error(f"Error de base de datos al eliminar el evento: {exc}")
+
     return f"Evento {event_id} eliminado correctamente."
 
 
