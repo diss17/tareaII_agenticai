@@ -106,7 +106,7 @@ def get_events(date: Optional[str] = None) -> str:
     lines = []
     for row in rows:
         lines.append(
-            f"ID {row['id']}: {row['title']} - {row['event_datetime']}"
+            f"{row['title']} - {row['event_datetime']}"
             f"{' (' + row['description'] + ')' if row['description'] else ''}"
         )
     return "\n".join(lines)

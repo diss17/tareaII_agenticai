@@ -16,7 +16,7 @@ class AgentState(TypedDict):
 
     messages: Annotated[list[AnyMessage], add_messages]
     user_input: str
-    assigned_agent: Literal["calculator", "organizer", "expert", "none"] | None
+    assigned_agent: Literal["calculator", "organizer", "expert", "out_of_scope"] | None
     task_description: str
     agent_result: str
     critic_decision: Literal["approved", "feedback", "pending"]

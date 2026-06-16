@@ -1,4 +1,5 @@
 from .json_parser import clean_json_output, parse_json_output
+from .date_detector import extract_date
 from .logging import (
     log,
     trace,

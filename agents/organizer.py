@@ -6,7 +6,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from state import AgentState
 from models import get_llm, get_structured_llm, OrganizerOutput
 from tools import add_event, get_events, update_event, delete_event
-from utils import is_tool_error, make_tool_error, trace, trace_message, trace_tool
+from utils import is_tool_error, make_tool_error, trace, trace_message, trace_tool, extract_date
 
 
 SYSTEM_PROMPT_TEMPLATE = """Eres un agente organizador especializado en gestión del tiempo.
@@ -17,13 +17,18 @@ Tienes acceso a un calendario local persistente. Debes usar una de estas herrami
 - "update_event": modifica un evento. Argumentos: event_id (int), title (str, opcional), event_datetime (str, opcional), description (str, opcional).
 - "delete_event": elimina un evento. Argumentos: event_id (int).
 
-Reglas:
+Reglas CRÍTICAS para fechas:
 - La fecha de hoy es {today}.
 - Si el usuario dice "mañana", usa {tomorrow}.
 - Si el usuario dice "pasado mañana", usa {day_after_tomorrow}.
 - Si no especifica hora, usa "00:00".
 - La fecha y hora deben estar en formato "YYYY-MM-DD HH:MM".
-- Si la consulta es para ver eventos sin fecha específica, omite el argumento date.
+
+Reglas para get_events:
+- Si el usuario pregunta por eventos en una FECHA ESPECÍFICA (ej: "el 16 de junio", "el 25 de diciembre de 2026", "mañana"), SIEMPRE debes pasar el argumento "date" en formato YYYY-MM-DD.
+- Si la consulta es GENÉRICA sin fecha específica (ej: "qué eventos tengo", "ver mi agenda"), omite el argumento date.
+- Ejemplo: "¿Tengo algo el 16 de junio de 2026?" → get_events con date="2026-06-16"
+- Ejemplo: "¿Qué eventos tengo mañana?" → get_events con date="{tomorrow}"
 """
 
 FINAL_PROMPT = """Eres un agente organizador. Dada la acción realizada en el calendario,
@@ -59,10 +64,21 @@ def organizer_node(state: AgentState) -> dict:
 
     Usa salida estructurada para que el modelo local produzca exactamente
     la herramienta de calendario y los argumentos esperados.
+
+    Incluye detección determinista de fechas con regex como FALLBACK para
+    garantizar que el parámetro 'date' se pase correctamente a get_events,
+    incluso si el LLM local no extrae la fecha del input del usuario.
     """
     trace("organizador", "Iniciando gestión de calendario")
     task = state.get("task_description", state["user_input"])
+    original_input = state["user_input"]
     trace("organizador", f"Tarea recibida: {task}")
+    trace("organizador", f"Input original del usuario: {original_input}")
+
+    # Detección determinista de fecha (fallback robusto)
+    detected_date = extract_date(original_input)
+    if detected_date:
+        trace("organizador", f"Fecha detectada en input: {detected_date}")
 
     messages = [
         SystemMessage(content=_build_system_prompt()),
@@ -84,6 +100,19 @@ def organizer_node(state: AgentState) -> dict:
 
     trace_message("modelo LLM", "organizador", str(parsed.model_dump_json()))
     trace("organizador", f"Herramienta seleccionada: {parsed.tool}")
+
+    # FALLBACK: Si el LLM eligió get_events sin fecha pero detectamos una fecha
+    # en el input original, forzar el uso de esa fecha
+    if (
+        parsed.tool == "get_events"
+        and detected_date
+        and not parsed.arguments.get("date")
+    ):
+        trace(
+            "organizador",
+            f"LLM no incluyó 'date'. Inyectando fecha detectada: {detected_date}",
+        )
+        parsed.arguments["date"] = detected_date
 
     if parsed.tool not in TOOLS:
         error_msg = f"Error: herramienta de calendario desconocida '{parsed.tool}'."

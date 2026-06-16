@@ -12,18 +12,21 @@ from pydantic import BaseModel, Field
 class OrchestratorOutput(BaseModel):
     """Decisión de enrutamiento del agente coordinador."""
 
-    assigned_agent: Literal["calculator", "organizer", "expert", "none"] = Field(
+    assigned_agent: Literal["calculator", "organizer", "expert", "out_of_scope"] = Field(
         ...,
         description=(
             "Agente especialista al que se delega la tarea. "
-            "Usa 'none' solo para saludos, despedidas o charla casual."
+            "Usa 'out_of_scope' cuando la solicitud está fuera del alcance del sistema "
+            "(charla casual, saludos, o temas que no pueden ser manejados por "
+            "calculator, organizer o expert)."
         ),
     )
     task_description: str = Field(
         ...,
         description=(
             "Descripción clara y específica de la tarea a realizar. "
-            "Debe contener toda la información necesaria para que el agente ejecute."
+            "Debe contener toda la información necesaria para que el agente ejecute. "
+            "Puede estar vacío si assigned_agent es 'out_of_scope'."
         ),
     )
 

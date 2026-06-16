@@ -12,12 +12,18 @@ Agentes disponibles:
 - "calculator": para operaciones matemáticas, cálculos numéricos, fórmulas.
 - "organizer": para gestionar el calendario, eventos, citas, agenda del usuario.
 - "expert": para consultas conceptuales, preguntas de conocimiento general, hechos del mundo.
-- "none": si la solicitud no requiere ninguna herramienta especializada (saludo, despedida, charla casual).
 
-Reglas:
-- Si hay retroalimentación del crítico, úsala para reformular la tarea.
-- El task_description debe incluir toda la información necesaria para que el agente ejecute sin preguntar.
-- Para saludos o charla casual, asigna "none" y deja task_description vacío.
+Reglas ESTRICTAS:
+- SOLO puedes asignar a uno de los 3 agentes anteriores (calculator, organizer, expert).
+- Si la solicitud está FUERA del alcance (charla casual, saludos, despedidas, o temas que ningún agente puede manejar), asigna "out_of_scope".
+- Si hay retroalimentación del crítico, úsala para reformular la tarea y reasigna a un agente válido.
+- CRÍTICO: El task_description debe preservar TODA la información del usuario, especialmente:
+  * Fechas y horas específicas (ej: "25 de diciembre de 2026", "mañana a las 10:00")
+  * Números, cantidades y unidades
+  * Nombres propios y títulos
+  * IDs de eventos
+- El task_description debe ser COPIA o PARÁFRASIS COMPLETA de la solicitud original, sin omitir detalles.
+- Para "out_of_scope", puedes dejar task_description vacío.
 """
 
 
@@ -51,20 +57,20 @@ def orchestrator_node(state: AgentState) -> dict:
         parsed = llm.invoke(messages)
     except Exception as exc:
         # Fallback: si el modelo local falla en structured output, usamos JSON plano
-        trace("orquestador", f"Structured output falló: {exc}. Usando fallback JSON.")
+        trace("orquestrador", f"Structured output falló: {exc}. Usando fallback JSON.")
         raw = get_llm(json_mode=True).invoke(messages)
         from utils import parse_json_output
         data = parse_json_output(raw.content)
         parsed = OrchestratorOutput(
-            assigned_agent=data.get("assigned_agent", "none"),
+            assigned_agent=data.get("assigned_agent", "out_of_scope"),
             task_description=data.get("task_description", state["user_input"]),
         )
 
     assigned_agent = parsed.assigned_agent
     task_description = parsed.task_description or state["user_input"]
 
-    trace("orquestador", f"Agente asignado: {assigned_agent}")
-    trace("orquestador", f"Descripción de tarea: {task_description}")
+    trace("orquestrador", f"Agente asignado: {assigned_agent}")
+    trace("orquestrador", f"Descripción de tarea: {task_description}")
 
     updates = {
         "assigned_agent": assigned_agent,
@@ -72,18 +78,17 @@ def orchestrator_node(state: AgentState) -> dict:
         "last_error": "",
     }
 
-    # Para charla casual, el propio orquestador genera la respuesta amable
-    # y la manda al crítico como filtro final, manteniendo la arquitectura.
-    if assigned_agent == "none":
-        direct_messages = [
-            SystemMessage(
-                content="Eres un asistente amable. Responde de forma breve y cordial en español."
-            ),
-            HumanMessage(content=state["user_input"]),
-        ]
-        direct_response = get_llm().invoke(direct_messages)
-        trace_message("modelo LLM", "orquestador", str(direct_response.content))
-        updates["agent_result"] = str(direct_response.content)
+    # Para solicitudes fuera de alcance, establecer mensaje de error estático
+    if assigned_agent == "out_of_scope":
+        out_of_scope_message = (
+            "Lo siento, esta solicitud está fuera del alcance del sistema. "
+            "Solo puedo ayudarte con: cálculos matemáticos, gestión de calendario, "
+            "y consultas de conocimiento general."
+        )
+        trace("orquestrador", f"Solicitud fuera de alcance: {out_of_scope_message}")
+        updates["final_response"] = out_of_scope_message
+        updates["agent_result"] = out_of_scope_message
+        updates["critic_decision"] = "approved"  # No necesita crítico
         updates["messages"] = [AIMessage(content=str(parsed.model_dump_json()))]
     else:
         updates["agent_result"] = ""
@@ -94,8 +99,10 @@ def orchestrator_node(state: AgentState) -> dict:
 
 def orchestrator_router(state: AgentState) -> str:
     """Devuelve el siguiente nodo según la decisión del orquestador."""
-    agent = state.get("assigned_agent", "none")
+    from langgraph.graph import END
+    
+    agent = state.get("assigned_agent", "out_of_scope")
     if agent in {"calculator", "organizer", "expert"}:
         return agent
-    # "none" va al crítico para evaluar la respuesta directa generada
-    return "critic"
+    # "out_of_scope" va directamente al END sin pasar por crítico
+    return END
