@@ -58,10 +58,12 @@ Thumbs.db
 # Proyecto específico
 # ========================================
 # Base de datos SQLite del calendario (persistencia local)
-calendar.db
+# El archivo calendar.db es un entregable (persistencia inicializada),
+# así que se excluye de la regla general de ignorado de *.db.
 *.sqlite
 *.sqlite3
 *.db
+!calendar.db
 
 # Archivos de modelo descargados por Ollama (si se copian al proyecto)
 models/*.gguf

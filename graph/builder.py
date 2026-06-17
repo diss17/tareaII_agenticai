@@ -73,6 +73,7 @@ def build_graph() -> StateGraph:
             "organizer": "organizer",
             "expert": "expert",
             "critic": "critic",
+            "__end__": "ensure_final_response",
         },
     )
 

@@ -30,7 +30,13 @@ pip install -r requirements.txt
 ollama serve
 ```
 
-2. Ejecuta el sistema:
+2. Descarga el modelo local utilizado por el sistema:
+
+```bash
+ollama pull gemma3:4b
+```
+
+3. Ejecuta el sistema:
 
 ```bash
 python main.py
